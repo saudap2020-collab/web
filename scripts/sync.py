@@ -151,6 +151,9 @@ def main():
                 else:
                     print("no changes")
                 return
+    for ws in wb.worksheets:
+        for i, row in enumerate(ws.iter_rows(values_only=True, max_row=4)):
+            print(f"sheet '{ws.title}' row {i + 1}:", [c for c in row if c is not None][:12] if i == 0 else len([c for c in row if c is not None]), "cells")
     sys.exit("Could not find columns: الإدارة، الاسم، نسبة الإكمال")
 
 
