@@ -5,6 +5,7 @@ import io
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 
 import openpyxl
@@ -25,12 +26,49 @@ def norm(s):
     return s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ة", "ه").replace("ى", "ي")
 
 
-def download(url):
-    token = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
-    api = f"https://api.onedrive.com/v1.0/shares/u!{token}/root/content"
-    req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+
+def fetch(url, headers=None):
+    req = urllib.request.Request(url, headers={**UA, **(headers or {})})
     with urllib.request.urlopen(req, timeout=60) as r:
-        return r.read()
+        return r.read(), r.geturl()
+
+
+def candidates(url):
+    token = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+    yield "shares-api", f"https://api.onedrive.com/v1.0/shares/u!{token}/root/content"
+    yield "share+download", url + ("&" if "?" in url else "?") + "download=1"
+    try:
+        _, final = fetch(url)
+        print("redirected to:", final.split("?")[0])
+        yield "final+download", final + ("&" if "?" in final else "?") + "download=1"
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(final).query)
+        resid = (q.get("resid") or q.get("id") or [None])[0]
+        redeem = (q.get("redeem") or [None])[0]
+        cid = (q.get("cid") or [None])[0]
+        if redeem:
+            yield "redeem-api", f"https://api.onedrive.com/v1.0/shares/{redeem}/root/content"
+            yield "redeem-u", f"https://api.onedrive.com/v1.0/shares/u!{redeem}/root/content"
+        if resid:
+            cid = cid or resid.split("!")[0]
+            yield "resid-download", f"https://onedrive.live.com/download?cid={cid}&resid={urllib.parse.quote(resid)}"
+            yield "my-personal", f"https://my.microsoftpersonalcontent.com/personal/{cid.lower()}/_layouts/15/download.aspx?UniqueId={urllib.parse.quote(resid.split('!')[-1])}"
+    except Exception as e:  # noqa: BLE001
+        print("redirect probe failed:", e)
+
+
+def download(url):
+    for name, c in candidates(url):
+        try:
+            data, _ = fetch(c)
+            ok = data[:2] == b"PK"
+            print(f"[{name}] {len(data)} bytes, xlsx={ok}")
+            if ok:
+                return data
+        except Exception as e:  # noqa: BLE001
+            print(f"[{name}] failed: {e}")
+    sys.exit("Could not download the workbook. Make sure the link is shared as 'Anyone with the link can view'.")
 
 
 def find_columns(row):
