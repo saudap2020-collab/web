@@ -2,6 +2,7 @@
 import base64
 import csv
 import io
+import json
 import os
 import re
 import sys
@@ -35,6 +36,28 @@ def fetch(url, headers=None):
         return r.read(), r.geturl()
 
 
+def badger_download(url):
+    """Anonymous access used by the OneDrive web app for new-style share links."""
+    req = urllib.request.Request(
+        "https://api-badgerp.svc.ms/v1.0/token",
+        data=b'{"appId":"5cbed6ac-a083-4e14-b191-b4ba07653de2"}',
+        headers={**UA, "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        tok = json.loads(r.read())["token"]
+    share = "u!" + base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+    for host in ("https://my.microsoftpersonalcontent.com/_api/v2.0", "https://api.onedrive.com/v1.0"):
+        try:
+            data, _ = fetch(f"{host}/shares/{share}/driveitem/content", {"Authorization": f"Badger {tok}", "Prefer": "autoredeem"})
+            print(f"[badger {host.split('/')[2]}] {len(data)} bytes, xlsx={data[:2] == b'PK'}")
+            if data[:2] == b"PK":
+                return data
+        except Exception as e:  # noqa: BLE001
+            print(f"[badger {host.split('/')[2]}] failed: {e}")
+    return None
+
+
 def candidates(url):
     token = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
     yield "shares-api", f"https://api.onedrive.com/v1.0/shares/u!{token}/root/content"
@@ -59,6 +82,12 @@ def candidates(url):
 
 
 def download(url):
+    try:
+        data = badger_download(url)
+        if data:
+            return data
+    except Exception as e:  # noqa: BLE001
+        print("[badger] failed:", e)
     for name, c in candidates(url):
         try:
             data, _ = fetch(c)
