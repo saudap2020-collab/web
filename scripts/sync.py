@@ -116,7 +116,7 @@ def to_pct(v):
     if v is None or v == "":
         return None
     if isinstance(v, (int, float)):
-        return round(v * 100, 1) if 0 < v <= 1 and not float(v).is_integer() else round(float(v), 1)
+        return float(v)
     s = str(v).replace("%", "").replace("٪", "").strip()
     s = s.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
     try:
@@ -146,7 +146,14 @@ def main():
                         unknown.add(str(get("progress")))
                     if not name or not dept or pct is None:
                         continue
-                    out.append([str(dept).strip(), str(name).strip(), str(get("course") or "").strip(), int(pct) if float(pct).is_integer() else pct])
+                    out.append([str(dept).strip(), str(name).strip(), str(get("course") or "").strip(), pct])
+                nums = [r[3] for r in out]
+                if nums and max(nums) <= 1:  # Excel percentage cells are stored as fractions
+                    for r in out:
+                        r[3] = r[3] * 100
+                for r in out:
+                    r[3] = round(r[3], 1)
+                    r[3] = int(r[3]) if float(r[3]).is_integer() else r[3]
                 if unknown:
                     print("unrecognised progress values:", sorted(unknown)[:20])
                 buf = io.StringIO()
