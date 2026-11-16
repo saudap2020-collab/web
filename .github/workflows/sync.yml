@@ -23,7 +23,7 @@ jobs:
       - run: pip install openpyxl==3.1.5
       - name: سحب البيانات من الإكسل
         env:
-          EXCEL_SHARE_URL: ${{ secrets.EXCEL_SHARE_URL != '' && secrets.EXCEL_SHARE_URL || 'https://1drv.ms/x/c/066a17cb861bd447/IQDSRrX7f_UfRa9B-nbsMeryASlskcHWlnXirxJoExi4MHk?e=w1mgmc' }}
+          EXCEL_SHARE_URL: ${{ secrets.EXCEL_SHARE_URL != '' && secrets.EXCEL_SHARE_URL || 'https://1drv.ms/x/c/066a17cb861bd447/IQDSRrX7f_UfRa9B-nbsMeryASlskcHWlnXirxJoExi4MHk?e=B6GSmE' }}
         run: python scripts/sync.py
       - name: حفظ التغييرات
         run: |
