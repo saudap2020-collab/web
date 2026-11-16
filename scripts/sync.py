@@ -16,9 +16,9 @@ OUT = os.environ.get("OUT_FILE", "members.csv")
 
 HEADERS = {
     "department": ["department", "الإدارة", "الادارة", "إدارة", "ادارة", "القسم"],
-    "member": ["member", "name", "الاسم", "اسم الموظف", "الموظف", "اسم العضو", "العضو"],
+    "member": ["member", "المتدرب", "اسم المتدرب", "المتدربين", "name", "الاسم", "اسم الموظف", "الموظف", "اسم العضو", "العضو"],
     "course": ["course", "الدورة", "الدوره", "اسم الدورة", "اسم الدوره", "الدورات"],
-    "progress": ["progress", "نسبة الإكمال", "نسبة الاكمال", "نسبة التقدم", "النسبة", "نسبه الاكمال", "نسبة الانجاز", "نسبة الإنجاز", "الإنجاز"],
+    "progress": ["progress", "حالة الإكمال", "حالة الاكمال", "الحالة", "نسبة الإكمال", "نسبة الاكمال", "نسبة التقدم", "النسبة", "نسبه الاكمال", "نسبة الانجاز", "نسبة الإنجاز", "الإنجاز"],
 }
 
 
@@ -122,7 +122,13 @@ def to_pct(v):
     try:
         return round(float(s), 1)
     except ValueError:
-        return None
+        pass
+    n = norm(s)
+    if any(w in n for w in ("لم يبدا", "لم تبدا", "غير مكتمل", "لم يكتمل")):
+        return 0.0 if "لم يبدا" in n or "لم تبدا" in n else None
+    if "مكتمل" in n or "منجز" in n or "تم" == n:
+        return 100.0
+    return None
 
 
 def main():
@@ -132,13 +138,17 @@ def main():
         for h, row in enumerate(rows[:10]):
             cols = find_columns(row)
             if {"department", "member", "progress"} <= cols.keys():
-                out = []
+                out, unknown = [], set()
                 for r in rows[h + 1:]:
                     get = lambda k: r[cols[k]] if k in cols and cols[k] < len(r) else None
                     name, dept, pct = get("member"), get("department"), to_pct(get("progress"))
+                    if name and dept and pct is None:
+                        unknown.add(str(get("progress")))
                     if not name or not dept or pct is None:
                         continue
                     out.append([str(dept).strip(), str(name).strip(), str(get("course") or "").strip(), int(pct) if float(pct).is_integer() else pct])
+                if unknown:
+                    print("unrecognised progress values:", sorted(unknown)[:20])
                 buf = io.StringIO()
                 w = csv.writer(buf, lineterminator="\n")
                 w.writerow(["department", "member", "course", "progress"])
