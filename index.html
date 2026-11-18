@@ -209,7 +209,7 @@ async function fetchExcel() {
 function rowsFromWorkbook(bytes) {
   const wb = XLSX.read(bytes, { type: 'array' });
   for (const name of wb.SheetNames) {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: null }); // النص كما يظهر في الإكسل
     for (let h = 0; h < Math.min(rows.length, 10); h++) {
       const cells = rows[h].map(norm), cols = {};
       for (const [k, names] of Object.entries(HEADERS)) {
@@ -224,8 +224,6 @@ function rowsFromWorkbook(bytes) {
         if (!dept || !member || pct == null) continue;
         out.push({ department: String(dept).trim(), member: String(member).trim(), course: String(cols.course != null ? r[cols.course] ?? '' : '').trim(), progress: pct });
       }
-      if (out.length && d3.max(out, (o) => o.progress) <= 1) out.forEach((o) => { o.progress *= 100; });
-      out.forEach((o) => { o.progress = Math.round(o.progress * 10) / 10; });
       return out;
     }
   }

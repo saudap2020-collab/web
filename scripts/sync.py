@@ -112,11 +112,23 @@ def find_columns(row):
     return found
 
 
+def shown(cell):
+    """The number exactly as Excel displays it (a 0.44 cell formatted as % shows 44)."""
+    v = cell.value
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        fmt = str(cell.number_format or "")
+        if "%" in fmt:
+            m = re.search(r"\.(0+)", fmt)
+            return round(v * 100, len(m.group(1)) if m else 0)
+        return v
+    return to_pct(v)
+
+
 def to_pct(v):
     if v is None or v == "":
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        return v
     s = str(v).replace("%", "").replace("٪", "").strip()
     s = s.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
     try:
@@ -132,27 +144,24 @@ def to_pct(v):
 
 
 def main():
-    wb = openpyxl.load_workbook(io.BytesIO(download(SHARE_URL)), data_only=True, read_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(download(SHARE_URL)), data_only=True)
     for ws in wb.worksheets:
-        rows = list(ws.iter_rows(values_only=True))
+        cells = list(ws.iter_rows())
+        rows = [tuple(c.value for c in row) for row in cells]
         for h, row in enumerate(rows[:10]):
             cols = find_columns(row)
             if {"department", "member", "progress"} <= cols.keys():
                 out, unknown = [], set()
-                for r in rows[h + 1:]:
+                for ri, r in enumerate(rows[h + 1:], start=h + 1):
                     get = lambda k: r[cols[k]] if k in cols and cols[k] < len(r) else None
-                    name, dept, pct = get("member"), get("department"), to_pct(get("progress"))
+                    name, dept = get("member"), get("department")
+                    pct = shown(cells[ri][cols["progress"]]) if cols["progress"] < len(cells[ri]) else None
                     if name and dept and pct is None:
                         unknown.add(str(get("progress")))
                     if not name or not dept or pct is None:
                         continue
                     out.append([str(dept).strip(), str(name).strip(), str(get("course") or "").strip(), pct])
-                nums = [r[3] for r in out]
-                if nums and max(nums) <= 1:  # Excel percentage cells are stored as fractions
-                    for r in out:
-                        r[3] = r[3] * 100
                 for r in out:
-                    r[3] = round(r[3], 1)
                     r[3] = int(r[3]) if float(r[3]).is_integer() else r[3]
                 if unknown:
                     print("unrecognised progress values:", sorted(unknown)[:20])
