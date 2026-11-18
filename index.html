@@ -14,6 +14,7 @@ document.documentElement.setAttribute('data-theme',s||(m?'dark':'light'));})();
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js"></script>
 <style>
 :root{--color-fg:#141A3A;--color-fg-muted:#636569;--color-bg:#F4F6FA;--color-panel:#FFFFFF;--color-border-line:#E3E7EF;
 --cds-gap-xs:4px;--cds-gap-sm:8px;--cds-gap-md:12px;--cds-gap-lg:20px;--cds-gap-xl:32px;--cds-pad-xs:4px;--cds-pad-sm:8px;--cds-pad-md:12px;--cds-pad-lg:20px;--cds-pad-xl:32px;
@@ -163,8 +164,73 @@ body{transition:background-color .3s ease}
 </main>
 
 <script>
-const DATA_URL = 'members.csv';
-const REFRESH_MS = 60 * 1000;
+const EXCEL_URL = 'https://1drv.ms/x/c/066a17cb861bd447/IQDSRrX7f_UfRa9B-nbsMeryASlskcHWlnXirxJoExi4MHk?e=B6GSmE';
+const DATA_URL = 'members.csv';           // نسخة احتياطية يحدّثها GitHub Actions
+const REFRESH_MS = 15 * 1000;              // كل ١٥ ثانية من الإكسل مباشرة
+let lastRows = null, source = null;
+
+/* ---------- قراءة الإكسل مباشرة من OneDrive ---------- */
+const HEADERS = {
+  department: ['department', 'الإدارة', 'الادارة', 'إدارة', 'ادارة', 'القسم'],
+  member: ['member', 'name', 'المتدرب', 'اسم المتدرب', 'الاسم', 'اسم الموظف', 'الموظف', 'اسم العضو', 'العضو'],
+  course: ['course', 'الدورة', 'الدوره', 'اسم الدورة', 'الدورات'],
+  progress: ['progress', 'حالة الإكمال', 'نسبة الإكمال', 'نسبة الاكمال', 'نسبة التقدم', 'نسبة الإنجاز', 'النسبة', 'الحالة', 'الإنجاز'],
+};
+const norm = (s) => String(s ?? '').replace(/[\u064B-\u0652\u0640]/g, '').trim().toLowerCase()
+  .replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
+const toNum = (v) => {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v;
+  const t = String(v).replace(/[%٪]/g, '').trim().replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+  if (t !== '' && !isNaN(+t)) return +t;
+  const n = norm(v);
+  if (n.includes('لم يبدا') || n.includes('لم تبدا')) return 0;
+  if (n.includes('مكتمل') && !n.includes('غير')) return 100;
+  return null;
+};
+let badger = null;
+async function badgerToken(force) {
+  if (badger && !force) return badger;
+  const r = await fetch('https://api-badgerp.svc.ms/v1.0/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: '5cbed6ac-a083-4e14-b191-b4ba07653de2' }) });
+  if (!r.ok) throw new Error('token ' + r.status);
+  return (badger = (await r.json()).token);
+}
+async function fetchExcel() {
+  const share = 'u!' + btoa(EXCEL_URL).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+  const url = `https://my.microsoftpersonalcontent.com/_api/v2.0/shares/${share}/driveitem/content`;
+  for (const force of [false, true]) {
+    const r = await fetch(url, { headers: { Authorization: 'Badger ' + await badgerToken(force), Prefer: 'autoredeem' }, cache: 'no-store' });
+    if (r.status === 401 || r.status === 403) continue;
+    if (!r.ok) throw new Error('excel ' + r.status);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+  throw new Error('excel unauthorized');
+}
+function rowsFromWorkbook(bytes) {
+  const wb = XLSX.read(bytes, { type: 'array' });
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
+    for (let h = 0; h < Math.min(rows.length, 10); h++) {
+      const cells = rows[h].map(norm), cols = {};
+      for (const [k, names] of Object.entries(HEADERS)) {
+        const want = names.map(norm);
+        const i = cells.findIndex((c) => c && want.some((w) => c === w || c.includes(w)));
+        if (i >= 0) cols[k] = i;
+      }
+      if (!['department', 'member', 'progress'].every((k) => k in cols)) continue;
+      const out = [];
+      for (const r of rows.slice(h + 1)) {
+        const dept = r[cols.department], member = r[cols.member], pct = toNum(r[cols.progress]);
+        if (!dept || !member || pct == null) continue;
+        out.push({ department: String(dept).trim(), member: String(member).trim(), course: String(cols.course != null ? r[cols.course] ?? '' : '').trim(), progress: pct });
+      }
+      if (out.length && d3.max(out, (o) => o.progress) <= 1) out.forEach((o) => { o.progress *= 100; });
+      out.forEach((o) => { o.progress = Math.round(o.progress * 10) / 10; });
+      return out;
+    }
+  }
+  throw new Error('columns not found');
+}
 const tone = (v) => v >= 80 ? ['#2A99AD', '#7FD3E0'] : v >= 60 ? ['#E3A33B', '#F6CF7E'] : ['#C73630', '#EE8A84'];
 const label = (v) => v >= 80 ? 'متقدم' : v >= 60 ? 'متوسط' : 'يحتاج دعم';
 const fmt = (v) => (Math.round(v * 10) / 10) + '%';
@@ -262,28 +328,40 @@ function render(members) {
     card.append(tbl); el.append(card);
   });
   firstDraw = false;
-  $('#updated').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
 }
 
 async function load() {
+  let rows = null;
   try {
-    const res = await fetch(DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) throw new Error(res.status);
-    const text = (await res.text()).replace(/^﻿/, '');
-    if (text === lastText) return;
-    lastText = text;
-    render(d3.csvParse(text));
+    rows = rowsFromWorkbook(await fetchExcel());
+    source = 'live';
   } catch (e) {
-    if (lastText == null) $('[data-draw="depts"]').replaceChildren(Object.assign(document.createElement('div'), { className: 'mz-fail', textContent: 'تعذّر تحميل البيانات' }));
+    try {
+      const res = await fetch(DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) throw new Error(res.status);
+      rows = d3.csvParse((await res.text()).replace(/^\uFEFF/, ''));
+      source = 'backup';
+    } catch (e2) {
+      if (lastRows == null) $('[data-draw="depts"]').replaceChildren(Object.assign(document.createElement('div'), { className: 'mz-fail', textContent: 'تعذّر تحميل البيانات' }));
+      return;
+    }
   }
+  const sig = JSON.stringify(rows);
+  if (sig !== lastText) { lastText = sig; lastRows = rows; render(rows); }
+  stamp();
+}
+function stamp() {
+  const t = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  $('#updated').textContent = (source === 'live' ? '● مباشر من ملف الإكسل · ' : 'من النسخة الاحتياطية · ') + 'آخر فحص: ' + t;
+  $('#updated').style.color = source === 'live' ? 'var(--mz-teal)' : '';
 }
 document.querySelectorAll('[data-draw="overallGauge"],[data-draw="depts"],.mz-kpi-num').forEach((e) => e.classList.add('dash-skeleton'));
 function syncTheme(){const cur=document.documentElement.getAttribute('data-theme');document.querySelectorAll('.mz-theme button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===cur)));}
-document.querySelectorAll('.mz-theme button').forEach(b=>b.addEventListener('click',()=>{document.documentElement.setAttribute('data-theme',b.dataset.mode);try{localStorage.setItem('mz-theme',b.dataset.mode)}catch(e){}syncTheme();if(lastText){const keep=lastText;lastText=null;firstDraw=false;render(d3.csvParse(keep));lastText=keep;}}));
+document.querySelectorAll('.mz-theme button').forEach(b=>b.addEventListener('click',()=>{document.documentElement.setAttribute('data-theme',b.dataset.mode);try{localStorage.setItem('mz-theme',b.dataset.mode)}catch(e){}syncTheme();if(lastRows){firstDraw=false;render(lastRows);stamp();}}));
 if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListener('change',e=>{let s=null;try{s=localStorage.getItem('mz-theme')}catch(_){}if(!s){document.documentElement.setAttribute('data-theme',e.matches?'dark':'light');syncTheme();}});}
 syncTheme();
 load();
-setInterval(load, REFRESH_MS);
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 </script>
 </body>
