@@ -1,0 +1,23 @@
+name: probe
+on:
+  push:
+    branches: [probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          O="https://saudap2020-collab.github.io"
+          echo "== token preflight"
+          curl -s -o /dev/null -D - -X OPTIONS "https://api-badgerp.svc.ms/v1.0/token" -H "Origin: $O" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type" | grep -i "^access-control\|^HTTP"
+          echo "== token post"
+          TOK=$(curl -s -X POST "https://api-badgerp.svc.ms/v1.0/token" -H "Origin: $O" -H "Content-Type: application/json" -d '{"appId":"5cbed6ac-a083-4e14-b191-b4ba07653de2"}' -D /tmp/h | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          grep -i "^access-control\|^HTTP" /tmp/h
+          URL="https://1drv.ms/x/c/066a17cb861bd447/IQDSRrX7f_UfRa9B-nbsMeryASlskcHWlnXirxJoExi4MHk?e=B6GSmE"
+          S="u!$(printf %s "$URL" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+          C="https://my.microsoftpersonalcontent.com/_api/v2.0/shares/$S/driveitem/content"
+          echo "== content preflight"
+          curl -s -o /dev/null -D - -X OPTIONS "$C" -H "Origin: $O" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,prefer" | grep -i "^access-control\|^HTTP"
+          echo "== content get (follow)"
+          curl -s -L -o /tmp/f -D - "$C" -H "Origin: $O" -H "Authorization: Badger $TOK" -H "Prefer: autoredeem" | grep -i "^access-control\|^HTTP\|^location" | sed 's/\(location: https:\/\/[^/]*\).*/\1/I'
+          head -c2 /tmp/f; echo; stat -c %s /tmp/f
